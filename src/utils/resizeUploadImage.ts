@@ -1,3 +1,5 @@
+import { throwIfAborted } from './abort.js'
+
 // 上传图片的长边上限，单位为像素。
 const MAX_IMAGE_EDGE = 4096
 
@@ -20,9 +22,9 @@ export const isUploadImageOversized = async (blob: Blob): Promise<boolean> =>
 
 /** 图片在尺寸上限内时返回原文件，超限时生成按比例缩小的上传副本。 */
 export const resizeUploadImage = async (file: File, signal?: AbortSignal): Promise<File> => {
-  signal?.throwIfAborted()
+  throwIfAborted(signal)
   const { image, longestEdge } = await readUploadImage(file)
-  signal?.throwIfAborted()
+  throwIfAborted(signal)
   if (longestEdge <= MAX_IMAGE_EDGE) {
     return file
   }
@@ -50,7 +52,7 @@ export const resizeUploadImage = async (file: File, signal?: AbortSignal): Promi
         1
       )
     })
-    signal?.throwIfAborted()
+    throwIfAborted(signal)
     // 浏览器可能回退到 PNG，上传文件的后缀以实际编码为准。
     const extension = blob.type === 'image/jpeg' ? 'jpg' : blob.type.slice('image/'.length)
     const name = file.name.replace(/\.[^.]*$/, '') + '.' + extension

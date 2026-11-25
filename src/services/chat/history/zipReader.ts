@@ -5,7 +5,9 @@ const READ_WINDOW_BYTES = 512 * 1024
 // 控制每轮同步解压的工作量；输出交给调用方保存后才继续读取。
 const INFLATE_CHUNK_BYTES = 8 * 1024
 
-const fileWindows = new WeakMap<File, { start: number; bytes: Uint8Array<ArrayBuffer> }>()
+type ReadWindow = { start: number; bytes: Uint8Array<ArrayBuffer> }
+// 会话 JSON 和图片可能分处两段，分别保留最近的读窗口。
+const fileWindows = new WeakMap<File, ReadWindow[]>()
 
 /** ZIP 结构损坏或使用了不支持的特性 */
 export class ArchiveError extends Error {
@@ -24,9 +26,9 @@ export const isZipFile = async (file: File) => {
   if (file.size < 4) {
     return false
   }
-  const cached = fileWindows.get(file)
+  const cached = fileWindows.get(file)?.find((window) => window.start === 0)
   const bytes =
-    cached && cached.start === 0 && cached.bytes.length >= 4
+    cached && cached.bytes.length >= 4
       ? cached.bytes.subarray(0, 4)
       : new Uint8Array(await file.slice(0, 4).arrayBuffer())
   return bytes.length === 4 && bytes.every((byte, index) => byte === [0x50, 0x4b, 3, 4][index])
@@ -49,7 +51,16 @@ const readBytes = async (file: File, start: number, length: number) => {
   if (length === 0) {
     return new Uint8Array(0)
   }
-  const cached = fileWindows.get(file)
+  const windows = fileWindows.get(file) ?? []
+  const cached = windows.find(
+    (window) => start >= window.start && start <= window.start + window.bytes.length
+  )
+  if (cached && cached !== windows[0]) {
+    windows.reverse()
+  }
+  const other = cached ? windows[1] : windows[0]
+  const saveWindow = (window: ReadWindow) =>
+    fileWindows.set(file, other ? [window, other] : [window])
   if (cached) {
     const cachedEnd = cached.start + cached.bytes.length
     if (start >= cached.start && start + length <= cachedEnd) {
@@ -64,7 +75,7 @@ const readBytes = async (file: File, start: number, length: number) => {
       if (tail.length !== readLength) {
         invalid()
       }
-      fileWindows.set(file, { start: cachedEnd, bytes: tail })
+      saveWindow({ start: cachedEnd, bytes: tail })
       const merged = new Uint8Array(length)
       merged.set(head, 0)
       merged.set(tail.subarray(0, remaining), head.length)
@@ -76,7 +87,7 @@ const readBytes = async (file: File, start: number, length: number) => {
   if (bytes.length !== readLength) {
     invalid()
   }
-  fileWindows.set(file, { start, bytes })
+  saveWindow({ start, bytes })
   return bytes.subarray(0, length)
 }
 
@@ -282,25 +293,25 @@ const readEntryOffset = async (file: File, entry: Entry, boundary: number) => {
 export type ArchiveEntry = {
   path: string
   size: number
+  offset: number
   stream: AsyncIterable<Uint8Array>
 }
 
 /**
- * 按条目在文件中的物理顺序逐条、逐块解压，跳过目录条目。
- * 读完当前条目再取下一个。数据块可能共享读窗口，请勿修改。
+ * 按物理顺序枚举文件，校验并跳过目录。各文件可按需逐块读取并校验 CRC。
+ * 数据块可能共享读窗口，请勿修改。
  */
 export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
   const directory = await readDirectory(file)
   for (const [index, entry] of directory.entries.entries()) {
     const boundary = directory.entries[index + 1]?.offset ?? directory.offset
-    const start = await readEntryOffset(file, entry, boundary)
-    const end = start + entry.compressedSize
     if (entry.path.endsWith('/')) {
-      await checkDataDescriptor(file, entry, end, boundary)
+      const start = await readEntryOffset(file, entry, boundary)
+      await checkDataDescriptor(file, entry, start + entry.compressedSize, boundary)
       continue
     }
-    let completed = false
     const stream = async function* (): AsyncGenerator<Uint8Array> {
+      const start = await readEntryOffset(file, entry, boundary)
       let written = 0
       let crc = 0xffffffff
       const pending: Uint8Array[] = []
@@ -343,13 +354,9 @@ export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
         invalid()
       }
       // 读完正文再检查描述符，避免提前跳到条目末尾。
-      await checkDataDescriptor(file, entry, end, boundary)
-      completed = true
+      await checkDataDescriptor(file, entry, start + entry.compressedSize, boundary)
     }
-    yield { path: entry.path, size: entry.size, stream: stream() }
-    if (!completed) {
-      invalid()
-    }
+    yield { path: entry.path, size: entry.size, offset: entry.offset, stream: stream() }
   }
   fileWindows.delete(file)
 }

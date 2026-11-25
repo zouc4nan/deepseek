@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { LinkedMessage, TranslationMessage } from '../i18n/index.js'
+import { getAbortReason, throwIfAborted } from '../utils/abort.js'
 import { isUploadImageOversized } from '../utils/resizeUploadImage.js'
 import { uploadFile } from './api/client.js'
 import { classifyApiError, getUploadErrorInfo, isRetryableApiError } from './api/errors.js'
@@ -130,7 +131,7 @@ const enqueueUpload = (
   new Promise<string>((resolve, reject) => {
     queue.push(async () => {
       if (signal.aborted) {
-        reject(signal.reason)
+        reject(getAbortReason(signal))
         return
       }
       try {
@@ -220,14 +221,14 @@ export const checkImageFileIds = async (files: FileAttachment[], signal: AbortSi
     if (!file.isImage || !file.serverId || file.imageSizeChecked || checked.has(file.id)) {
       continue
     }
-    signal.throwIfAborted()
+    throwIfAborted(signal)
     const oversized = await loadFile(file.id)
       .then((blob) => blob && isUploadImageOversized(blob))
       .catch(() => undefined)
     if (oversized === undefined) {
       continue
     }
-    signal.throwIfAborted()
+    throwIfAborted(signal)
     const task = useUploads.getState().tasks[file.id]
     if (oversized && task?.status === 'done' && task.serverId === file.serverId) {
       cancelUpload(file.id)

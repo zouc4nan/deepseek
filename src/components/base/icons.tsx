@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 export const IconCheckOutline16 = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path
@@ -185,6 +187,24 @@ export const IconLinkOutline14 = () => (
     />
   </svg>
 )
+
+export const IconLoadingOutline16 = () => {
+  const gradientId = useId()
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true">
+      <defs>
+        <linearGradient id={gradientId} x2="0" y2="1">
+          <stop stopColor="currentColor" stopOpacity={0.52} />
+          <stop offset="1" stopColor="currentColor" stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <path
+        fill={`url(#${gradientId})`}
+        d="M2.871 13.1286C0.0387669 10.2962 0.0387669 5.70383 2.871 2.87141C5.70341 0.0390029 10.2957 0.0391154 13.1282 2.87141L12.1387 3.86094C9.85292 1.57538 6.1469 1.57596 3.86123 3.86163C1.57573 6.14732 1.57573 9.85269 3.86123 12.1384C6.1469 14.424 9.85292 14.4246 12.1387 12.1391L13.1282 13.1286C10.2957 15.9609 5.70341 15.961 2.871 13.1286Z"
+      />
+    </svg>
+  )
+}
 
 export const IconMenuOutline20 = () => (
   <svg width={20} height={20} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
